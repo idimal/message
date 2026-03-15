@@ -218,7 +218,7 @@ async function flushCandidates(){
 
 }
 
-function sendMessage(){
+async function sendMessage(){
 
     const msg = document.getElementById("message").value;
 
@@ -230,9 +230,52 @@ function sendMessage(){
 
     }else{
 
-        log("Channel not ready");
+        log("P2P unavailable → sending via server");
+
+        await fetch("/send",{
+
+            method:"POST",
+            headers:{
+                "Content-Type":"application/json"
+            },
+            body:JSON.stringify({
+
+                sender:myId,
+                receiver:peerId,
+                text:msg
+
+            })
+
+        });
 
     }
 
 }
 
+
+async function checkInbox(){
+
+    const res = await fetch("/inbox/"+myId);
+
+    const msgs = await res.json();
+
+    for(const m of msgs){
+
+        log("Offline msg: "+m.text);
+
+        await fetch("/delivered",{
+
+            method:"POST",
+            headers:{
+                "Content-Type":"application/json"
+            },
+            body:JSON.stringify({id:m.id})
+
+        });
+
+    }
+
+}
+
+
+setInterval(checkInbox,4000);
