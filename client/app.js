@@ -5,6 +5,8 @@ let dataChannel;
 let myId;
 let peerId;
 
+let candidateQueue = [];
+
 const log = (msg) => {
     document.getElementById("log").textContent += msg + "\n";
 };
@@ -36,6 +38,14 @@ function connect(){
             await handleSignal(msg.data);
 
         }
+
+    };
+
+    ws.onclose = () => {
+
+        log("Signaling disconnected");
+
+        setTimeout(connect,3000);
 
     };
 
@@ -80,18 +90,49 @@ function createPeer(){
 
     };
 
+    pc.onconnectionstatechange = ()=>{
+
+        log("Connection state: " + pc.connectionState);
+
+        if(pc.connectionState === "failed"){
+
+            log("Connection failed");
+
+        }
+
+    };
+
     pc.ondatachannel = (event)=>{
 
         dataChannel = event.channel;
 
-        dataChannel.onmessage = (event)=>{
-            log("Peer: " + event.data);
-        };
+        setupChannel();
 
     };
 
 }
 
+function setupChannel(){
+
+    dataChannel.onopen = ()=>{
+
+        log("DataChannel opened");
+
+    };
+
+    dataChannel.onmessage = (event)=>{
+
+        log("Peer: " + event.data);
+
+    };
+
+    dataChannel.onclose = ()=>{
+
+        log("DataChannel closed");
+
+    };
+
+}
 
 async function startConnection(){
 
@@ -99,9 +140,7 @@ async function startConnection(){
 
     dataChannel = pc.createDataChannel("chat");
 
-    dataChannel.onmessage = (event)=>{
-        log("Peer: " + event.data);
-    };
+    setupChannel();
 
     const offer = await pc.createOffer();
 
@@ -139,19 +178,43 @@ async function handleSignal(data){
             }
         }));
 
+        await flushCandidates();
+
     }
 
     if(data.type === "answer"){
 
         await pc.setRemoteDescription(data.answer);
 
+        await flushCandidates();
+
     }
 
     if(data.type === "candidate"){
 
-        await pc.addIceCandidate(data.candidate);
+        if(pc.remoteDescription){
+
+            await pc.addIceCandidate(data.candidate);
+
+        }else{
+
+            candidateQueue.push(data.candidate);
+
+        }
 
     }
+
+}
+
+async function flushCandidates(){
+
+    for(const c of candidateQueue){
+
+        await pc.addIceCandidate(c);
+
+    }
+
+    candidateQueue = [];
 
 }
 
@@ -159,8 +222,17 @@ function sendMessage(){
 
     const msg = document.getElementById("message").value;
 
-    dataChannel.send(msg);
+    if(dataChannel && dataChannel.readyState === "open"){
 
-    log("Me: " + msg);
+        dataChannel.send(msg);
+
+        log("Me: " + msg);
+
+    }else{
+
+        log("Channel not ready");
+
+    }
 
 }
+
