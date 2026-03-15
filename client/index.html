@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Messenger</h2>
+
+<input id="msg">
+<button onclick="send()">Send</button>
+
+<script>
+
+let ws = new WebSocket("ws://localhost:3000");
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type:"register",
+    id:"user1"
+  }));
+};
+
+function send() {
+
+  ws.send(JSON.stringify({
+    type:"signal",
+    target:"user2",
+    message:document.getElementById("msg").value
+  }));
+
+}
+
+ws.onmessage = (event) => {
+  console.log(event.data);
+};
+
+</script>
+
+</body>
+</html>
