@@ -163,7 +163,7 @@ async function handleSignal(data){
 
         createPeer();
 
-        await pc.setRemoteDescription(data.offer);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
 
         const answer = await pc.createAnswer();
 
@@ -184,7 +184,7 @@ async function handleSignal(data){
 
     if(data.type === "answer"){
 
-        await pc.setRemoteDescription(data.answer);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 
         await flushCandidates();
 
