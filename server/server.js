@@ -61,6 +61,6 @@ wss.on("connection", (ws) => {
 
 });
 
-server.listen(3000, () => {
-    console.log("Signaling server running on port 3000");
+server.listen(3000, "0.0.0.0", () => {
+    console.log("Signaling server running");
 });
