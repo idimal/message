@@ -1,38 +1,31 @@
 <!DOCTYPE html>
 <html>
+
+<head>
+<meta charset="utf-8">
+<title>Family WebRTC Chat</title>
+</head>
+
 <body>
 
-<h2>Messenger</h2>
+<h2>WebRTC Family Chat</h2>
 
-<input id="msg">
-<button onclick="send()">Send</button>
+Your ID:
+<input id="myId">
 
-<script>
+Peer ID:
+<input id="peerId">
 
-let ws = new WebSocket("ws://localhost:3000");
+<button onclick="connect()">Connect</button>
 
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    type:"register",
-    id:"user1"
-  }));
-};
+<br><br>
 
-function send() {
+<input id="message">
+<button onclick="sendMessage()">Send</button>
 
-  ws.send(JSON.stringify({
-    type:"signal",
-    target:"user2",
-    message:document.getElementById("msg").value
-  }));
+<pre id="log"></pre>
 
-}
-
-ws.onmessage = (event) => {
-  console.log(event.data);
-};
-
-</script>
+<script src="app.js"></script>
 
 </body>
 </html>
