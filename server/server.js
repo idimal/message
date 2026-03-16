@@ -162,6 +162,20 @@ app.post("/delivered", (req, res) => {
   res.send({ status: "ok" });
 });
 
+// history (chat)
+app.get("/chats/:chatId/history", (req, res) => {
+  const token = req.query.token;
+  const userId = tokens[token];
+  const chatId = req.params.chatId;
+  const limit = parseInt(req.query.limit || "200", 10);
+  if (!userId) return res.status(403).send({ error: "not auth" });
+  const chat = chats[chatId];
+  if(!chat || !chat.members.includes(userId)) return res.status(403).send({ error: "no access" });
+  messages.getHistory(chatId, limit, (rows) => {
+    res.send(rows);
+  });
+});
+
 // ------------------------------------------------------------
 
 // WebSocket handling: register + signaling + chat participants broadcast

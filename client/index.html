@@ -7,20 +7,18 @@
     body { font-family: sans-serif; display:flex; height:100vh; margin:0; }
     #left { width:260px; border-right:1px solid #ddd; padding:10px; box-sizing:border-box; }
     #main { flex:1; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; }
-    #chats { margin-top:10px; }
+    #chats { margin-top:10px; max-height:70vh; overflow:auto; }
     .chat-item { padding:6px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
     #messages { flex:1; overflow:auto; border:1px solid #eee; padding:8px; }
     #compose { display:flex; gap:8px; margin-top:8px; }
+    .msg-local { color: #064; }
+    .msg-remote { color: #006; }
   </style>
 </head>
 <body>
   <div id="left">
     <h3>Account</h3>
-    <div>
-      <input id="loginUser" placeholder="user id"><br><br>
-      <input id="loginPass" type="password" placeholder="password"><br><br>
-      <button id="btnLogin">Login / Register</button>
-    </div>
+    <div id="accountInfo"></div>
 
     <h3>Your Chats</h3>
     <div id="chats"></div>

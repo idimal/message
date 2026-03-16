@@ -63,8 +63,25 @@ function markDelivered(id){
 
 }
 
+function getHistory(chatId, limit, callback){
+    limit = limit || 200;
+    db.all(
+        `SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC LIMIT ?`,
+        [chatId, limit],
+        (err, rows) => {
+            if(err){
+                console.error(err);
+                callback([]);
+            }else{
+                callback(rows || []);
+            }
+        }
+    );
+}
+
 module.exports = {
     storeMessage,
     getMessagesForUser,
-    markDelivered
+    markDelivered,
+    getHistory
 };

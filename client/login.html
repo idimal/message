@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Login — Family Messenger</title>
+  <style>
+    body { font-family: sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+    .box { width:320px; padding:20px; border:1px solid #ddd; border-radius:6px; }
+    input { width:100%; margin:6px 0; padding:8px; box-sizing:border-box; }
+    button { width:100%; padding:8px; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h3>Family Messenger — Login</h3>
+    <input id="user" placeholder="User id (eg. alice)" />
+    <input id="pass" placeholder="Password" type="password" />
+    <button id="btn">Login / Register</button>
+    <p id="info" style="color:#555;font-size:13px"></p>
+  </div>
+
+<script>
+document.getElementById("btn").onclick = async () => {
+  const user = document.getElementById("user").value.trim();
+  const pass = document.getElementById("pass").value.trim();
+  const info = document.getElementById("info");
+  if(!user || !pass){ info.textContent = "Enter both user and password"; return; }
+
+  // try register (ignore errors)
+  try{
+    await fetch("/auth/register", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId:user, password:pass }) });
+  }catch(e){ /* ignore */ }
+
+  // then login
+  const res = await fetch("/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId:user, password:pass }) });
+  const j = await res.json();
+  if(j.error){ info.textContent = "Auth failed: " + j.error; return; }
+  // store token and userId
+  localStorage.setItem("token", j.token);
+  localStorage.setItem("userId", j.userId);
+  // go to app
+  location.href = "/";
+};
+</script>
+</body>
+</html>
