@@ -1,31 +1,48 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-<meta charset="utf-8">
-<title>Family WebRTC Chat</title>
+  <meta charset="utf-8">
+  <title>Family Messenger</title>
+  <style>
+    body { font-family: sans-serif; display:flex; height:100vh; margin:0; }
+    #left { width:260px; border-right:1px solid #ddd; padding:10px; box-sizing:border-box; }
+    #main { flex:1; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; }
+    #chats { margin-top:10px; }
+    .chat-item { padding:6px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
+    #messages { flex:1; overflow:auto; border:1px solid #eee; padding:8px; }
+    #compose { display:flex; gap:8px; margin-top:8px; }
+  </style>
 </head>
-
 <body>
+  <div id="left">
+    <h3>Account</h3>
+    <div>
+      <input id="loginUser" placeholder="user id"><br><br>
+      <input id="loginPass" type="password" placeholder="password"><br><br>
+      <button id="btnLogin">Login / Register</button>
+    </div>
 
-<h2>WebRTC Family Chat</h2>
+    <h3>Your Chats</h3>
+    <div id="chats"></div>
 
-Your ID:
-<input id="myId">
+    <hr>
+    <h4>Create chat</h4>
+    <input id="chatName" placeholder="chat name"><br>
+    <input id="chatMembers" placeholder="members (comma)"><br>
+    <button id="btnCreateChat">Create chat</button>
+  </div>
 
-Peer ID:
-<input id="peerId">
+  <div id="main">
+    <h3 id="chatTitle">No chat</h3>
+    <div id="participants"></div>
+    <div id="messages"></div>
+    <div id="compose">
+      <input id="message" style="flex:1">
+      <button id="btnSend">Send</button>
+    </div>
+    <pre id="log" style="height:80px; overflow:auto;"></pre>
+  </div>
 
-<button onclick="connect()">Connect</button>
-
-<br><br>
-
-<input id="message">
-<button onclick="sendMessage()">Send</button>
-
-<pre id="log"></pre>
-
-<script src="app.js"></script>
-
+  <script src="app.js"></script>
 </body>
 </html>

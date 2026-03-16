@@ -1,42 +1,56 @@
 const db = require("./database");
 
-function storeMessage(sender,receiver,text){
+function storeMessage(sender, receiver, text, chatId){
 
     const time = Date.now();
 
     db.run(
         `INSERT INTO messages
-        (sender,receiver,text,timestamp,delivered)
-        VALUES (?,?,?,?,0)`,
-        [sender,receiver,text,time],
+        (sender,receiver,text,chatId,timestamp,delivered)
+        VALUES (?,?,?,?,?,0)`,
+        [sender,receiver,text,chatId,time],
         function(err){
-
-            if(err){
-                console.error(err);
-            }
-
+            if(err) console.error(err);
         }
     );
 
 }
 
-function getMessages(user,callback){
+function getMessagesForUser(user, chatId, callback){
 
-    db.all(
-        `SELECT * FROM messages
-        WHERE receiver=? AND delivered=0`,
-        [user],
-        (err,rows)=>{
+    if(chatId){
 
-            if(err){
-                console.error(err);
-                callback([]);
-            }else{
-                callback(rows);
+        db.all(
+            `SELECT * FROM messages
+             WHERE receiver=? AND chatId=? AND delivered=0`,
+            [user,chatId],
+            (err,rows)=>{
+                if(err){
+                    console.error(err);
+                    callback([]);
+                }else{
+                    callback(rows);
+                }
             }
+        );
 
-        }
-    );
+    }else{
+
+        db.all(
+            `SELECT * FROM messages
+             WHERE receiver=? AND delivered=0`,
+            [user],
+            (err,rows)=>{
+                if(err){
+                    console.error(err);
+                    callback([]);
+                }else{
+                    callback(rows);
+                }
+            }
+        );
+
+    }
 
 }
 
@@ -49,8 +63,8 @@ function markDelivered(id){
 
 }
 
-module.exports={
+module.exports = {
     storeMessage,
-    getMessages,
+    getMessagesForUser,
     markDelivered
 };
