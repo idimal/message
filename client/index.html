@@ -1,46 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Family Messenger</title>
-  <style>
-    body { font-family: sans-serif; display:flex; height:100vh; margin:0; }
-    #left { width:260px; border-right:1px solid #ddd; padding:10px; box-sizing:border-box; }
-    #main { flex:1; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; }
-    #chats { margin-top:10px; max-height:70vh; overflow:auto; }
-    .chat-item { padding:6px; border:1px solid #eee; margin-bottom:6px; cursor:pointer; }
-    #messages { flex:1; overflow:auto; border:1px solid #eee; padding:8px; }
-    #compose { display:flex; gap:8px; margin-top:8px; }
-    .msg-local { color: #064; }
-    .msg-remote { color: #006; }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Чаты — Messenger</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-  <div id="left">
-    <h3>Account</h3>
-    <div id="accountInfo"></div>
-
-    <h3>Your Chats</h3>
-    <div id="chats"></div>
-
-    <hr>
-    <h4>Create chat</h4>
-    <input id="chatName" placeholder="chat name"><br>
-    <input id="chatMembers" placeholder="members (comma)"><br>
-    <button id="btnCreateChat">Create chat</button>
-  </div>
-
-  <div id="main">
-    <h3 id="chatTitle">No chat</h3>
-    <div id="participants"></div>
-    <div id="messages"></div>
-    <div id="compose">
-      <input id="message" style="flex:1">
-      <button id="btnSend">Send</button>
+<body id="index-page">
+  <div class="container">
+    <div class="header">
+      <div>
+        <div class="title">Чаты</div>
+        <div id="accountInfo" class="small" style="margin-top:4px"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <button id="btnCreatePage" class="btn btn-green">Создать чат</button>
+        <button id="btnLogout" class="btn" style="background:transparent;color:var(--muted)">Выйти</button>
+      </div>
     </div>
-    <pre id="log" style="height:80px; overflow:auto;"></pre>
+
+    <div class="card">
+      <div class="small" style="margin-bottom:8px">Доступные чаты</div>
+      <div id="chats" class="chats-list"></div>
+      <div id="emptyHint" class="small" style="margin-top:10px;color:var(--muted)">Чатов нет — создайте новый</div>
+    </div>
+
+    <div style="height:12px"></div>
+    <div class="log-area card small" id="log">Логи: </div>
   </div>
 
-  <script src="app.js"></script>
+<script src="/app.js"></script>
+<script>
+/* index page init */
+window.addEventListener('load', async () => {
+  if(!app_init()) return; // app_init из app.js
+  document.getElementById("btnCreatePage").onclick = () => location.href = "/create.html";
+  document.getElementById("btnLogout").onclick = () => { localStorage.removeItem("token"); localStorage.removeItem("userId"); location.href="/login.html"; };
+  await app_loadChats(); // загрузит и отрендерит
+});
+</script>
 </body>
 </html>

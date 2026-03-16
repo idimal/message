@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Создать чат</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body id="create-page">
+  <div class="container">
+    <div class="header">
+      <div class="title">Создать новый чат</div>
+      <div>
+        <button id="btnBack" class="btn btn-back">Назад</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="small">Название чата</label>
+      <input id="chatName" placeholder="Например, личка">
+
+      <label class="small" style="margin-top:8px">Кого добавить (через запятую, без пробелов вокруг имён)</label>
+      <input id="chatMembers" placeholder="alice,bob">
+
+      <div style="height:8px"></div>
+      <button id="btnCreateChat" class="btn btn-primary">Создать чат</button>
+      <div id="createInfo" class="small" style="margin-top:8px;color:var(--muted)"></div>
+    </div>
+  </div>
+
+<script src="/app.js"></script>
+<script>
+window.addEventListener('load', () => {
+  if(!app_init()) return;
+  document.getElementById("btnBack").onclick = () => location.href = "/";
+  document.getElementById("btnCreateChat").onclick = async () => {
+    const name = document.getElementById("chatName").value.trim();
+    const membersRaw = document.getElementById("chatMembers").value.trim();
+    const members = membersRaw ? membersRaw.split(",").map(s=>s.trim()).filter(Boolean) : [];
+    const info = document.getElementById("createInfo");
+    if(!name){ info.textContent = "Введите название чата"; return; }
+    try{
+      const res = await fetch("/chats", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token: localStorage.getItem("token"), name, members })});
+      const j = await res.json();
+      if(j.chatId){
+        info.textContent = "Чат создан";
+        location.href = "/chat.html?chatId="+encodeURIComponent(j.chatId);
+      }else{
+        info.textContent = "Ошибка создания";
+      }
+    }catch(e){
+      info.textContent = "Ошибка сети";
+    }
+  };
+});
+</script>
+</body>
+</html>

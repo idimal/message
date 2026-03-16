@@ -1,22 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Login — Family Messenger</title>
-  <style>
-    body { font-family: sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
-    .box { width:320px; padding:20px; border:1px solid #ddd; border-radius:6px; }
-    input { width:100%; margin:6px 0; padding:8px; box-sizing:border-box; }
-    button { width:100%; padding:8px; margin-top:10px; }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Вход — Мессенджер</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="box">
-    <h3>Family Messenger — Login</h3>
-    <input id="user" placeholder="User id (eg. alice)" />
-    <input id="pass" placeholder="Password" type="password" />
-    <button id="btn">Login / Register</button>
-    <p id="info" style="color:#555;font-size:13px"></p>
+  <div class="login-wrap">
+    <div class="container login-box card">
+      <h2 class="title">Messenger</h2>
+      <p class="small">Войдите или зарегистрируйтесь</p>
+
+      <label class="small" for="user">Логин</label>
+      <input id="user" type="text" placeholder="например, alice">
+
+      <label class="small" for="pass">Пароль</label>
+      <input id="pass" type="password" placeholder="пароль">
+
+      <div style="height:10px"></div>
+      <button id="btn" class="btn btn-primary" style="width:100%;">Войти / Регистрация</button>
+
+      <p id="info" class="small" style="margin-top:10px;color:var(--muted)"></p>
+    </div>
   </div>
 
 <script>
@@ -24,22 +30,22 @@ document.getElementById("btn").onclick = async () => {
   const user = document.getElementById("user").value.trim();
   const pass = document.getElementById("pass").value.trim();
   const info = document.getElementById("info");
-  if(!user || !pass){ info.textContent = "Enter both user and password"; return; }
+  if(!user || !pass){ info.textContent = "Введите логин и пароль"; return; }
 
-  // try register (ignore errors)
   try{
+    // Попытка регистрации (игнорируем ошибку, если уже зарегистрирован)
     await fetch("/auth/register", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId:user, password:pass }) });
-  }catch(e){ /* ignore */ }
-
-  // then login
-  const res = await fetch("/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId:user, password:pass }) });
-  const j = await res.json();
-  if(j.error){ info.textContent = "Auth failed: " + j.error; return; }
-  // store token and userId
-  localStorage.setItem("token", j.token);
-  localStorage.setItem("userId", j.userId);
-  // go to app
-  location.href = "/";
+  }catch(e){}
+  try{
+    const res = await fetch("/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId:user, password:pass }) });
+    const j = await res.json();
+    if(j.error){ info.textContent = "Ошибка аутентификации: " + j.error; return; }
+    localStorage.setItem("token", j.token);
+    localStorage.setItem("userId", j.userId);
+    location.href = "/";
+  }catch(e){
+    info.textContent = "Ошибка сети, повторите позже";
+  }
 };
 </script>
 </body>

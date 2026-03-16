@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Чат — Messenger</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body id="chat-page">
+  <div class="container" style="display:flex;flex-direction:column;height:100vh;">
+    <div class="chat-header">
+      <button id="btnBack" class="btn-back">← Назад</button>
+      <div style="flex:1">
+        <div id="chatTitle" class="title">Чат</div>
+        <div id="participants" class="small">Участники</div>
+      </div>
+      <div style="width:60px;text-align:right">
+        <button id="btnRefresh" class="btn" title="Обновить">⟳</button>
+      </div>
+    </div>
+
+    <div id="messages" class="messages card" style="margin-top:6px;"></div>
+
+    <div class="composer">
+      <div class="input-wrap card" style="padding:8px;">
+        <input id="message" type="text" placeholder="Напишите сообщение..." autocomplete="off">
+      </div>
+      <button id="btnSend" class="btn-send btn-green" title="Отправить">
+        <!-- arrow icon simple -->
+        <svg class="icon-arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 12L21 3L14 12L21 21L3 12Z" fill="white"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="log-area small card" id="log" style="margin-top:8px;">Логи:</div>
+  </div>
+
+<script src="/app.js"></script>
+<script>
+window.addEventListener('load', async () => {
+  if(!app_init()) return;
+  // получить chatId из query
+  const params = new URLSearchParams(location.search);
+  const chatId = params.get('chatId');
+  if(!chatId){ alert("Нет chatId"); location.href="/"; return; }
+
+  // инициализация страницы чата
+  await app_openChat(chatId);
+
+  document.getElementById("btnBack").onclick = () => location.href = "/";
+
+  document.getElementById("btnSend").onclick = () => {
+    document.getElementById("btnSend").disabled = true;
+    setTimeout(()=>document.getElementById("btnSend").disabled = false, 400);
+    app_sendMessage();
+  };
+
+  document.getElementById("btnRefresh").onclick = () => app_loadHistory(chatId);
+
+  // отправка Enter
+  document.getElementById("message").addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){ e.preventDefault(); app_sendMessage(); }
+  });
+});
+</script>
+</body>
+</html>
