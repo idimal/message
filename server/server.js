@@ -17,6 +17,21 @@ app.use(express.static("../client"));
 
 let clients = {};
 
+function broadcastUserList(){
+
+    const users = Object.keys(clients);
+
+    const msg = JSON.stringify({
+        type:"users",
+        users:users
+    });
+
+    for(const id in clients){
+        clients[id].send(msg);
+    }
+
+}
+
 wss.on("connection",(ws)=>{
 
     let clientId = null;
@@ -33,6 +48,8 @@ wss.on("connection",(ws)=>{
                 clients[clientId] = ws;
 
                 console.log("Client registered:",clientId);
+
+                broadcastUserList();
 
                 break;
 
@@ -60,8 +77,9 @@ wss.on("connection",(ws)=>{
 
         if(clientId){
             delete clients[clientId];
+            broadcastUserList();
         }
-
+    
     });
 
 });

@@ -7,6 +7,12 @@ let peerId;
 
 let candidateQueue = [];
 
+myId = localStorage.getItem("myId") || myId;
+peerId = localStorage.getItem("peerId") || peerId;
+
+localStorage.setItem("myId",myId);
+localStorage.setItem("peerId",peerId);
+
 const log = (msg) => {
     document.getElementById("log").textContent += msg + "\n";
 };
@@ -14,7 +20,7 @@ const log = (msg) => {
 function connect(){
 
     myId = document.getElementById("myId").value;
-    peerId = document.getElementById("peerId").value;
+    peerId = null;
 
     ws = new WebSocket("ws://" + location.host);
 
@@ -24,9 +30,18 @@ function connect(){
             type:"register",
             id: myId
         }));
-
+    
         log("Connected to signaling server");
-
+    
+        // автоматически пробуем создать P2P
+        setTimeout(() => {
+    
+            if(peerId){
+                startConnection();
+            }
+    
+        },1000);
+    
     };
 
     ws.onmessage = async (event) => {
@@ -34,9 +49,25 @@ function connect(){
         const msg = JSON.parse(event.data);
 
         if(msg.type === "signal"){
-
             await handleSignal(msg.data);
-
+        }
+        
+        if(msg.type === "users"){
+        
+            const others = msg.users.filter(u => u !== myId);
+        
+            if(others.length > 0){
+        
+                peerId = others[0];
+        
+                log("Discovered peer: " + peerId);
+        
+                if(!pc){
+                    startConnection();
+                }
+        
+            }
+        
         }
 
     };
@@ -93,13 +124,17 @@ function createPeer(){
     pc.onconnectionstatechange = ()=>{
 
         log("Connection state: " + pc.connectionState);
-
-        if(pc.connectionState === "failed"){
-
-            log("Connection failed");
-
+    
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
+    
+            log("Reconnecting P2P...");
+    
+            setTimeout(()=>{
+                startConnection();
+            },3000);
+    
         }
-
+    
     };
 
     pc.ondatachannel = (event)=>{
@@ -135,6 +170,9 @@ function setupChannel(){
 }
 
 async function startConnection(){
+    if(pc && pc.connectionState === "connected"){
+        return;
+    }
 
     createPeer();
 
@@ -219,6 +257,10 @@ async function flushCandidates(){
 }
 
 async function sendMessage(){
+    if(!dataChannel || dataChannel.readyState !== "open"){
+        log("P2P not ready, trying reconnect");
+        startConnection();
+    }
 
     const msg = document.getElementById("message").value;
 
@@ -279,3 +321,9 @@ async function checkInbox(){
 
 
 setInterval(checkInbox,4000);
+
+window.onload = () => {
+
+    connect();
+
+};
