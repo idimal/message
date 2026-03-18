@@ -383,7 +383,7 @@ function safeSendSignal(target, chatId, data){
 
 async function startConnectionToPeer(peerId, chatId){
   if(isPeerAlive(peerId)) return;
-  // if(!(myUserId < peerId)) return; // tie-break
+   if(!(myUserId < peerId)) return; // tie-break
   const pc = createPeerFor(peerId, chatId);
   const channel = pc.createDataChannel("chat");
   dataChannels[peerId] = channel;
