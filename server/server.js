@@ -149,11 +149,9 @@ app.post("/chats/:chatId/messages", (req, res) => {
 
   messages.storeMessage(userId, chatId, text.trim(), recipients, (ok, meta) => {
     if (!ok) return res.status(500).send({ error: "store failed" });
-
     return res.send({
       status: "stored",
-      messageId: meta.messageId,
-      timestamp: meta.timestamp
+      timestamp: meta?.timestamp || Date.now()
     });
   });
 });
@@ -171,10 +169,10 @@ app.get("/inbox/:user", (req, res) => {
 
 // mark delivered
 app.post("/delivered", (req, res) => {
-  const { token, messageId } = req.body;
+  const { token, id } = req.body;
   const userId = tokens[token];
   if (!userId) return res.status(403).send({ error: "not auth" });
-  messages.markDelivered(messageId, userId);
+  messages.markDelivered(id);
   res.send({ status: "ok" });
 });
 
