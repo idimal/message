@@ -239,7 +239,9 @@ function appendMessageToUi(peerId, text, isLocal, ts, messageId, chatId){
   const targetChatId = chatId || activeChatId;
   if(messageId && targetChatId){
     const seen = getRenderedSet(targetChatId);
-    const key = String(messageId);
+    const key = messageId
+  ? String(messageId)
+  : `${peerId}_${text}_${ts}`;
     if(seen.has(key)) return;
     seen.add(key);
   }
@@ -276,12 +278,19 @@ async function checkInboxForChat(chatId){
     if(!res.ok) return;
     const msgs = await res.json();
     for(const m of msgs){
-      appendMessageToUi(m.sender, m.text, false, m.timestamp, m.messageId, chatId);
+      appendMessageToUi(
+        m.sender,
+        m.text,
+        false,
+        m.timestamp,
+        m.id, // ВАЖНО
+        chatId
+      );
     
       await fetch("/delivered", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, messageId: m.messageId })
+        body: JSON.stringify({ token, messageId: m.id })
       });
     }
   }catch(e){ console.warn("inbox error", e); }
@@ -345,7 +354,25 @@ function setupDataChannel(peerId){
       reconnectTimers[peerId].attempts = 0;
     }
   };
-  dc.onmessage = ev => appendMessageToUi(peerId, ev.data, false, Date.now());
+  dc.onmessage = ev => {
+    try{
+      const msg = JSON.parse(ev.data);
+  
+      if(msg.type === "chat-message"){
+        appendMessageToUi(
+          msg.sender,
+          msg.text,
+          msg.sender === myUserId,
+          msg.timestamp,
+          msg.messageId,
+          msg.chatId
+        );
+      }
+  
+    }catch(e){
+      console.warn("Invalid message format", ev.data);
+    }
+  };
   dc.onclose = () => { log(`DC[${peerId}] закрыт`); scheduleReconnect(peerId, activeChatId); };
 }
 
@@ -356,7 +383,7 @@ function safeSendSignal(target, chatId, data){
 
 async function startConnectionToPeer(peerId, chatId){
   if(isPeerAlive(peerId)) return;
-  if(!(myUserId < peerId)) return; // tie-break
+  // if(!(myUserId < peerId)) return; // tie-break
   const pc = createPeerFor(peerId, chatId);
   const channel = pc.createDataChannel("chat");
   dataChannels[peerId] = channel;
