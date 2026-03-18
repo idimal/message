@@ -20,6 +20,12 @@
     </div>
 
     <div id="messages" class="messages card" style="margin-top:6px;"></div>
+    <div id="typing" class="typing hidden">
+      <span>печатает</span>
+      <div class="dots">
+        <div></div><div></div><div></div>
+      </div>
+    </div>
 
     <div class="composer">
       <div class="input-wrap card" style="padding:8px;">
@@ -62,6 +68,16 @@ window.addEventListener('load', async () => {
   document.getElementById("message").addEventListener('keydown', (e)=>{
     if(e.key === 'Enter'){ e.preventDefault(); app_sendMessage(); }
   });
+});
+const input = document.getElementById("message");
+
+input.addEventListener("input", () => {
+  sendTyping(true);
+
+  clearTimeout(window.typingTimer);
+  window.typingTimer = setTimeout(() => {
+    sendTyping(false);
+  }, 1500);
 });
 </script>
 </body>

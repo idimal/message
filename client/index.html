@@ -3,40 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Чаты — Messenger</title>
+  <title>Чаты — Family Messenger</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body id="index-page">
-  <div class="container">
-    <div class="header">
-      <div>
-        <div class="title">Чаты</div>
-        <div id="accountInfo" class="small" style="margin-top:4px"></div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
-        <button id="btnCreatePage" class="btn btn-green">Создать чат</button>
-        <button id="btnLogout" class="btn" style="background:transparent;color:var(--muted)">Выйти</button>
-      </div>
+
+<div class="container">
+  <div class="header">
+    <div>
+      <div class="title">Чаты</div>
+      <div id="accountInfo" class="small"></div>
     </div>
 
-    <div class="card">
-      <div class="small" style="margin-bottom:8px">Доступные чаты</div>
-      <div id="chats" class="chats-list"></div>
-      <div id="emptyHint" class="small" style="margin-top:10px;color:var(--muted)">Чатов нет — создайте новый</div>
+    <div style="display:flex;gap:8px;">
+      <button id="btnOpenModal" class="btn btn-green">+ Чат</button>
+      <button id="btnLogout" class="btn ghost">Выйти</button>
     </div>
-
-    <div style="height:12px"></div>
-    <div class="log-area card small" id="log">Логи: </div>
   </div>
+
+  <div class="card">
+    <div id="chats" class="chats-list"></div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>Создать чат</h3>
+
+    <input id="chatName" placeholder="Название чата">
+    <input id="chatMembers" placeholder="Участники (через запятую)">
+
+    <div style="margin-top:10px;display:flex;gap:8px;">
+      <button id="btnCreateChat" class="btn btn-primary">Создать</button>
+      <button id="btnCloseModal" class="btn ghost">Отмена</button>
+    </div>
+
+    <div id="createInfo" class="small"></div>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 <script>
-/* index page init */
 window.addEventListener('load', async () => {
-  if(!app_init()) return; // app_init из app.js
-  document.getElementById("btnCreatePage").onclick = () => location.href = "/create.html";
-  document.getElementById("btnLogout").onclick = () => { localStorage.removeItem("token"); localStorage.removeItem("userId"); location.href="/login.html"; };
-  await app_loadChats(); // загрузит и отрендерит
+  if(!app_init()) return;
+
+  document.getElementById("btnLogout").onclick = () => {
+    localStorage.clear();
+    location.href = "/login.html";
+  };
+
+  // модалка
+  const modal = document.getElementById("modalOverlay");
+
+  document.getElementById("btnOpenModal").onclick = () => {
+    modal.classList.remove("hidden");
+    setTimeout(()=> modal.classList.add("show"), 10);
+  };
+
+  document.getElementById("btnCloseModal").onclick = closeModal;
+  modal.onclick = (e)=>{ if(e.target === modal) closeModal(); };
+
+  function closeModal(){
+    modal.classList.remove("show");
+    setTimeout(()=> modal.classList.add("hidden"), 200);
+  }
+
+  // создание чата
+  document.getElementById("btnCreateChat").onclick = async () => {
+    const name = chatName.value.trim();
+    const members = chatMembers.value.split(",").map(s=>s.trim()).filter(Boolean);
+
+    const res = await fetch("/chats", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ token: localStorage.getItem("token"), name, members })
+    });
+
+    const j = await res.json();
+    if(j.chatId){
+      closeModal();
+      location.href = "/chat.html?chatId=" + j.chatId;
+    }
+  };
+
+  await app_loadChats();
 });
 </script>
 </body>
