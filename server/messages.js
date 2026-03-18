@@ -1,87 +1,127 @@
 const db = require("./database");
 
-function storeMessage(sender, receiver, text, chatId){
+// --- schema ---
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chat_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      text TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    )
+  `);
 
-    const time = Date.now();
+  db.run(`
+    CREATE TABLE IF NOT EXISTS pending_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      receiver TEXT NOT NULL,
+      text TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      delivered INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+});
 
-    db.run(
-        `INSERT INTO messages
-        (sender,receiver,text,chatId,timestamp,delivered)
-        VALUES (?,?,?,?,?,0)`,
-        [sender,receiver,text,chatId,time],
-        function(err){
-            if(err) console.error(err);
+// Save one message to history + create delivery queue for offline/fallback recipients
+function storeMessage(sender, chatId, text, recipients, callback) {
+  const timestamp = Date.now();
+  const cleanRecipients = Array.from(
+    new Set((recipients || []).filter(u => u && u !== sender))
+  );
+
+  db.run(
+    `INSERT INTO chat_history (chatId, sender, text, timestamp)
+     VALUES (?, ?, ?, ?)`,
+    [chatId, sender, text, timestamp],
+    function (err) {
+      if (err) {
+        console.error("storeMessage history error:", err);
+        if (callback) callback(false);
+        return;
+      }
+
+      if (cleanRecipients.length === 0) {
+        if (callback) callback(true, { messageId: this.lastID, timestamp });
+        return;
+      }
+
+      const stmt = db.prepare(`
+        INSERT INTO pending_messages
+          (chatId, sender, receiver, text, timestamp, delivered)
+        VALUES (?, ?, ?, ?, ?, 0)
+      `);
+
+      for (const receiver of cleanRecipients) {
+        stmt.run([chatId, sender, receiver, text, timestamp]);
+      }
+
+      stmt.finalize((finalizeErr) => {
+        if (finalizeErr) {
+          console.error("storeMessage pending finalize error:", finalizeErr);
+          if (callback) callback(false);
+          return;
         }
-    );
-
-}
-
-function getMessagesForUser(user, chatId, callback){
-
-    if(chatId){
-
-        db.all(
-            `SELECT * FROM messages
-             WHERE receiver=? AND chatId=? AND delivered=0`,
-            [user,chatId],
-            (err,rows)=>{
-                if(err){
-                    console.error(err);
-                    callback([]);
-                }else{
-                    callback(rows);
-                }
-            }
-        );
-
-    }else{
-
-        db.all(
-            `SELECT * FROM messages
-             WHERE receiver=? AND delivered=0`,
-            [user],
-            (err,rows)=>{
-                if(err){
-                    console.error(err);
-                    callback([]);
-                }else{
-                    callback(rows);
-                }
-            }
-        );
-
+        if (callback) callback(true, { messageId: this.lastID, timestamp });
+      });
     }
-
+  );
 }
 
-function markDelivered(id){
+// Pending/offline messages for a user
+function getMessagesForUser(user, chatId, callback) {
+  const sql = chatId
+    ? `SELECT * FROM pending_messages
+       WHERE receiver=? AND chatId=? AND delivered=0
+       ORDER BY timestamp ASC`
+    : `SELECT * FROM pending_messages
+       WHERE receiver=? AND delivered=0
+       ORDER BY timestamp ASC`;
 
-    db.run(
-        `UPDATE messages SET delivered=1 WHERE id=?`,
-        [id]
-    );
+  const params = chatId ? [user, chatId] : [user];
 
+  db.all(sql, params, (err, rows) => {
+    if (err) {
+      console.error("getMessagesForUser error:", err);
+      callback([]);
+      return;
+    }
+    callback(rows || []);
+  });
 }
 
-function getHistory(chatId, limit, callback){
-    limit = limit || 200;
-    db.all(
-        `SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC LIMIT ?`,
-        [chatId, limit],
-        (err, rows) => {
-            if(err){
-                console.error(err);
-                callback([]);
-            }else{
-                callback(rows || []);
-            }
-        }
-    );
+function markDelivered(id) {
+  db.run(`UPDATE pending_messages SET delivered=1 WHERE id=?`, [id], err => {
+    if (err) console.error("markDelivered error:", err);
+  });
+}
+
+// Full chat history
+function getHistory(chatId, limit, callback) {
+  const lim = Number.isFinite(limit) ? limit : 200;
+
+  db.all(
+    `SELECT * FROM chat_history
+     WHERE chatId=?
+     ORDER BY timestamp ASC
+     LIMIT ?`,
+    [chatId, lim],
+    (err, rows) => {
+      if (err) {
+        console.error("getHistory error:", err);
+        callback([]);
+        return;
+      }
+      callback(rows || []);
+    }
+  );
 }
 
 module.exports = {
-    storeMessage,
-    getMessagesForUser,
-    markDelivered,
-    getHistory
+  storeMessage,
+  getMessagesForUser,
+  markDelivered,
+  getHistory
 };

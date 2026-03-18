@@ -97,8 +97,15 @@ function startWebSocket(){
         renderChats();
       } else if(msg.type === "chat-participants"){
         onlineInChat[msg.chatId] = msg.users;
-        if(msg.chatId === activeChatId) renderActiveChat();
-        if(msg.chatId === activeChatId) tryAutoConnectToChatPeers(msg.chatId);
+      
+        if(msg.chatId === activeChatId){
+          renderActiveChat();
+      
+          //  всегда пробуем восстановить
+          setTimeout(() => {
+            tryAutoConnectToChatPeers(msg.chatId);
+          }, 300);
+        }
       } else if(msg.type === "signal"){
         await handleSignal(msg.from, msg.chatId, msg.data);
       } else if(msg.type === "error"){
@@ -163,32 +170,58 @@ async function app_loadHistory(chatId){
 async function app_sendMessage(){
   const txtInput = q("message");
   if(!txtInput) return;
+
   const text = txtInput.value.trim();
   if(!activeChatId || !token) { alert("Откройте чат"); return; }
   if(!text) return;
-  const chat = chatsList.find(c=>c.chatId===activeChatId);
+
+  const chat = chatsList.find(c => c.chatId === activeChatId);
   if(!chat) return;
 
-  const peers = chat.members.filter(m=>m!==myUserId);
+  // 1) Сначала сохраняем сообщение на сервере:
+  // история станет доступна сразу и всегда.
+  let savedTimestamp = Date.now();
+  try {
+    const res = await fetch(`/chats/${encodeURIComponent(activeChatId)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, text })
+    });
+
+    if(!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(errText || "save failed");
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (data.timestamp) savedTimestamp = data.timestamp;
+  } catch (e) {
+    console.warn("Server save failed:", e);
+    alert("Не удалось сохранить сообщение на сервере. История может не обновиться.");
+    return;
+  }
+
+  // 2) Потом пробуем отправить по P2P
+  const peers = chat.members.filter(m => m !== myUserId);
   let sentP2P = false;
+
   for(const p of peers){
     const dc = dataChannels[p];
     if(dc && dc.readyState === "open"){
-      try{ dc.send(text); appendMessageToUi(p, text, true, Date.now()); sentP2P = true; }
-      catch(e){ console.warn("send p2p err", e); }
+      try{
+        dc.send(text);
+        sentP2P = true;
+      }catch(e){
+        console.warn("send p2p err", e);
+      }
     }
   }
 
+  // 3) Локально показываем сообщение один раз
+  appendMessageToUi(null, text, true, savedTimestamp);
+
   if(!sentP2P){
-    for(const r of peers){
-      await fetch(`/chats/${activeChatId}/messages`, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ token, receiver: r, text })
-      });
-    }
-    appendMessageToUi(null, text, true, Date.now());
-    log("Отправлено через сервер (fallback)");
+    log("Сообщение сохранено на сервере, доставка пойдёт через fallback.");
   }
 
   txtInput.value = "";
@@ -269,7 +302,16 @@ function createPeerFor(peerId, chatId){
 function setupDataChannel(peerId){
   const dc = dataChannels[peerId];
   if(!dc) return;
-  dc.onopen = () => log(`DC[${peerId}] открыт`);
+  dc.onopen = () => {
+    log(`DC[${peerId}] открыт`);
+  
+    // сброс таймера реконнекта
+    if(reconnectTimers[peerId]){
+      clearTimeout(reconnectTimers[peerId].timerId);
+      reconnectTimers[peerId].timerId = null;
+      reconnectTimers[peerId].attempts = 0;
+    }
+  };
   dc.onmessage = ev => appendMessageToUi(peerId, ev.data, false, Date.now());
   dc.onclose = () => { log(`DC[${peerId}] закрыт`); scheduleReconnect(peerId, activeChatId); };
 }
@@ -280,7 +322,7 @@ function safeSendSignal(target, chatId, data){
 }
 
 async function startConnectionToPeer(peerId, chatId){
-  if(pcs[peerId]) return;
+  if(isPeerAlive(peerId)) return;
   if(!(myUserId < peerId)) return; // tie-break
   const pc = createPeerFor(peerId, chatId);
   const channel = pc.createDataChannel("chat");
@@ -348,15 +390,69 @@ function scheduleReconnect(peerId, chatId){
   }, delay);
 }
 
+function isPeerAlive(peerId){
+  const pc = pcs[peerId];
+  const dc = dataChannels[peerId];
+
+  if(!pc || !dc) return false;
+
+  if(pc.connectionState !== "connected") return false;
+  if(dc.readyState !== "open") return false;
+
+  return true;
+}
+
 function tryAutoConnectToChatPeers(chatId){
   const users = onlineInChat[chatId] || [];
+
   for(const peer of users){
     if(peer === myUserId) continue;
-    if(!pcs[peer]){
+
+    if(!isPeerAlive(peer)){
+      console.log("Пересоздаём соединение с", peer);
+
+      // 💣 ВАЖНО: убиваем старое соединение полностью
+      if(pcs[peer]){
+        try{ pcs[peer].close(); }catch(e){}
+        delete pcs[peer];
+      }
+
+      if(dataChannels[peer]){
+        try{ dataChannels[peer].close(); }catch(e){}
+        delete dataChannels[peer];
+      }
+
       startConnectionToPeer(peer, chatId);
     }
   }
 }
+
+setInterval(() => {
+  if(!activeChatId) return;
+
+  const users = onlineInChat[activeChatId] || [];
+
+  for(const peer of users){
+    if(peer === myUserId) continue;
+
+    if(!isPeerAlive(peer)){
+      console.log("Watchdog: reconnect to", peer);
+
+      if(pcs[peer]){
+        try{ pcs[peer].close(); }catch(e){}
+        delete pcs[peer];
+      }
+
+      if(dataChannels[peer]){
+        try{ dataChannels[peer].close(); }catch(e){}
+        delete dataChannels[peer];
+      }
+
+      startConnectionToPeer(peer, activeChatId);
+    }
+  }
+
+}, 5000);
 
 // --- Утилиты ---
 function escapeHtml(s){ if(!s) return ""; return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }

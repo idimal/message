@@ -131,15 +131,29 @@ app.post("/chats/:chatId/add", (req, res) => {
 
 // Send message via server (store-and-forward), supports chatId + receiver
 app.post("/chats/:chatId/messages", (req, res) => {
-  const { token, receiver, text } = req.body;
+  const { token, text } = req.body;
   const userId = tokens[token];
   if (!userId) return res.status(403).send({ error: "not auth" });
+
   const chatId = req.params.chatId;
   const chat = chats[chatId];
-  if(!chat || !chat.members.includes(userId)) return res.status(403).send({ error: "no access" });
-  // store per-message: sender, receiver, chatId
-  messages.storeMessage(userId, receiver, text, chatId);
-  return res.send({ status: "stored" });
+  if (!chat || !chat.members.includes(userId)) {
+    return res.status(403).send({ error: "no access" });
+  }
+
+  if (!text || !text.trim()) {
+    return res.status(400).send({ error: "empty text" });
+  }
+
+  const recipients = chat.members.filter(m => m !== userId);
+
+  messages.storeMessage(userId, chatId, text.trim(), recipients, (ok, meta) => {
+    if (!ok) return res.status(500).send({ error: "store failed" });
+    return res.send({
+      status: "stored",
+      timestamp: meta?.timestamp || Date.now()
+    });
+  });
 });
 
 // Get undelivered messages for user (optionally filtered by chat)
