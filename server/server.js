@@ -133,25 +133,12 @@ app.post("/chats/:chatId/add", (req, res) => {
 app.post("/chats/:chatId/messages", (req, res) => {
   const { token, text } = req.body;
   const userId = tokens[token];
-  if (!userId) return res.status(403).send({ error: "not auth" });
 
-  const chatId = req.params.chatId;
-  const chat = chats[chatId];
-  if (!chat || !chat.members.includes(userId)) {
-    return res.status(403).send({ error: "no access" });
-  }
-
-  if (!text || !text.trim()) {
-    return res.status(400).send({ error: "empty text" });
-  }
-
+  const chat = chats[req.params.chatId];
   const recipients = chat.members.filter(m => m !== userId);
 
-  messages.storeMessage(userId, chatId, text.trim(), recipients, (ok, meta) => {
-    if (!ok) return res.status(500).send({ error: "store failed" });
-
-    return res.send({
-      status: "stored",
+  messages.storeMessage(userId, req.params.chatId, text, recipients, (ok, meta) => {
+    res.send({
       messageId: meta.messageId,
       timestamp: meta.timestamp
     });
@@ -173,11 +160,11 @@ app.get("/inbox/:user", (req, res) => {
 app.post("/delivered", (req, res) => {
   const { token, messageId } = req.body;
   const userId = tokens[token];
-  if (!userId) return res.status(403).send({ error: "not auth" });
+
   messages.markDelivered(messageId, userId);
+
   res.send({ status: "ok" });
 });
-
 // history (chat)
 app.get("/chats/:chatId/history", (req, res) => {
   const token = req.query.token;

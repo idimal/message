@@ -8,6 +8,7 @@ const pcs = {};
 const dataChannels = {};
 const candidateQueues = {};
 const reconnectTimers = {};
+const renderedMessageIds = {};
 
 // chat state
 let activeChatId = null;
@@ -54,6 +55,17 @@ async function app_loadChats(){
     localStorage.removeItem("userId");
     location.href = "/login.html";
   }
+}
+
+function getRenderedSet(chatId){
+  if(!renderedMessageIds[chatId]){
+    renderedMessageIds[chatId] = new Set();
+  }
+  return renderedMessageIds[chatId];
+}
+
+function resetRenderedSet(chatId){
+  renderedMessageIds[chatId] = new Set();
 }
 
 function renderChats(){
@@ -123,6 +135,7 @@ function startWebSocket(){
 // --- Chat page: открыть чат, загрузить историю, render ---
 async function app_openChat(chatId){
   activeChatId = chatId;
+  resetRenderedSet(chatId);
   await app_loadChats(); // убедимся, что список чатов загружен (для названия/участников)
   renderActiveChat();
   await app_loadHistory(chatId);
@@ -157,8 +170,14 @@ async function app_loadHistory(chatId){
     const mcont = q("messages");
     if(mcont) mcont.innerHTML = "";
     for(const m of msgs){
-      const isLocal = (m.sender === myUserId);
-      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp);
+      appendMessageToUi(
+        m.sender,
+        m.text,
+        m.sender === myUserId,
+        m.timestamp,
+        m.id,
+        chatId
+      );
     }
     if(mcont) mcont.scrollTop = mcont.scrollHeight;
   }catch(e){
@@ -229,11 +248,12 @@ async function app_sendMessage(){
 
 // append message UI helper
 function appendMessageToUi(peerId, text, isLocal, ts){
-  const mcont = q("messages");
-  if(!mcont){
-    // debug fallback
-    log((isLocal ? "Я" : (peerId||"Сервер")) + ": " + text);
-    return;
+  const targetChatId = chatId || activeChatId;
+
+  if(messageId){
+    const seen = getRenderedSet(targetChatId);
+    if(seen.has(messageId)) return;
+    seen.add(messageId);
   }
   const row = document.createElement("div");
   row.className = "msg-row";
@@ -258,8 +278,20 @@ async function checkInboxForChat(chatId){
     if(!res.ok) return;
     const msgs = await res.json();
     for(const m of msgs){
-      appendMessageToUi(m.sender, m.text, false, m.timestamp);
-      await fetch("/delivered", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token, id: m.id }) });
+      appendMessageToUi(
+        m.sender,
+        m.text,
+        false,
+        m.timestamp,
+        m.messageId,
+        chatId
+      );
+    
+      await fetch("/delivered", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ token, messageId: m.messageId })
+      });
     }
   }catch(e){ console.warn("inbox error", e); }
 }
