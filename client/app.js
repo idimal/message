@@ -8,7 +8,6 @@ const pcs = {};
 const dataChannels = {};
 const candidateQueues = {};
 const reconnectTimers = {};
-const renderedMessageIds = {}; // chatId -> Set(messageId)
 
 // chat state
 let activeChatId = null;
@@ -101,9 +100,11 @@ function startWebSocket(){
       
         if(msg.chatId === activeChatId){
           renderActiveChat();
+      
+          //  всегда пробуем восстановить
           setTimeout(() => {
-            syncChatPeers(msg.chatId);
-          }, 200);
+            tryAutoConnectToChatPeers(msg.chatId);
+          }, 300);
         }
       } else if(msg.type === "signal"){
         await handleSignal(msg.from, msg.chatId, msg.data);
@@ -122,16 +123,13 @@ function startWebSocket(){
 // --- Chat page: открыть чат, загрузить историю, render ---
 async function app_openChat(chatId){
   activeChatId = chatId;
-  resetRenderedSet(chatId);
-  await app_loadChats();
+  await app_loadChats(); // убедимся, что список чатов загружен (для названия/участников)
   renderActiveChat();
   await app_loadHistory(chatId);
-  syncChatPeers(chatId);
-
+  tryAutoConnectToChatPeers(chatId);
+  // запрашивать входящие сообщения каждые 4 сек
   if(typeof app_inboxInterval === 'undefined'){
-    window.app_inboxInterval = setInterval(() => {
-      if(activeChatId) checkInboxForChat(activeChatId);
-    }, 4000);
+    window.app_inboxInterval = setInterval(() => { if(activeChatId) checkInboxForChat(activeChatId); }, 4000);
   }
 }
 
@@ -160,7 +158,7 @@ async function app_loadHistory(chatId){
     if(mcont) mcont.innerHTML = "";
     for(const m of msgs){
       const isLocal = (m.sender === myUserId);
-      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp, m.id, chatId);
+      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp);
     }
     if(mcont) mcont.scrollTop = mcont.scrollHeight;
   }catch(e){
@@ -180,46 +178,38 @@ async function app_sendMessage(){
   const chat = chatsList.find(c => c.chatId === activeChatId);
   if(!chat) return;
 
-  let messageId = null;
+  // 1) Сначала сохраняем сообщение на сервере:
+  // история станет доступна сразу и всегда.
   let savedTimestamp = Date.now();
-
-  try{
+  try {
     const res = await fetch(`/chats/${encodeURIComponent(activeChatId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, text })
     });
 
-    if(!res.ok) throw new Error("save failed");
+    if(!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(errText || "save failed");
+    }
 
-    const data = await res.json();
-    messageId = data.messageId;
-    savedTimestamp = data.timestamp || savedTimestamp;
-  }catch(e){
+    const data = await res.json().catch(() => ({}));
+    if (data.timestamp) savedTimestamp = data.timestamp;
+  } catch (e) {
     console.warn("Server save failed:", e);
-    alert("Не удалось сохранить сообщение на сервере.");
+    alert("Не удалось сохранить сообщение на сервере. История может не обновиться.");
     return;
   }
 
-  // показать локально один раз
-  appendMessageToUi(myUserId, text, true, savedTimestamp, messageId, activeChatId);
-
+  // 2) Потом пробуем отправить по P2P
   const peers = chat.members.filter(m => m !== myUserId);
-  const payload = JSON.stringify({
-    type: "chat-message",
-    messageId,
-    chatId: activeChatId,
-    sender: myUserId,
-    text,
-    timestamp: savedTimestamp
-  });
-
   let sentP2P = false;
+
   for(const p of peers){
     const dc = dataChannels[p];
     if(dc && dc.readyState === "open"){
       try{
-        dc.send(payload);
+        dc.send(text);
         sentP2P = true;
       }catch(e){
         console.warn("send p2p err", e);
@@ -227,43 +217,35 @@ async function app_sendMessage(){
     }
   }
 
+  // 3) Локально показываем сообщение один раз
+  appendMessageToUi(null, text, true, savedTimestamp);
+
   if(!sentP2P){
-    log("Сохранено на сервере, доставка пойдёт через fallback.");
+    log("Сообщение сохранено на сервере, доставка пойдёт через fallback.");
   }
 
   txtInput.value = "";
 }
 
 // append message UI helper
-function appendMessageToUi(peerId, text, isLocal, ts, messageId, chatId){
-  const targetChatId = chatId || activeChatId;
-  if(messageId && targetChatId){
-    const seen = getRenderedSet(targetChatId);
-    const key = String(messageId);
-    if(seen.has(key)) return;
-    seen.add(key);
-  }
-
+function appendMessageToUi(peerId, text, isLocal, ts){
   const mcont = q("messages");
   if(!mcont){
+    // debug fallback
     log((isLocal ? "Я" : (peerId||"Сервер")) + ": " + text);
     return;
   }
-
   const row = document.createElement("div");
   row.className = "msg-row";
-
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble " + (isLocal ? "msg-local" : "msg-remote");
   bubble.textContent = text;
   row.appendChild(bubble);
-
   const meta = document.createElement("div");
   meta.className = "msg-meta small";
   const who = isLocal ? "Я" : (peerId || "Сервер");
   meta.textContent = who + (ts ? " • " + new Date(ts).toLocaleTimeString() : "");
   bubble.appendChild(meta);
-
   mcont.appendChild(row);
   mcont.scrollTop = mcont.scrollHeight;
 }
@@ -276,13 +258,8 @@ async function checkInboxForChat(chatId){
     if(!res.ok) return;
     const msgs = await res.json();
     for(const m of msgs){
-      appendMessageToUi(m.sender, m.text, false, m.timestamp, m.messageId, chatId);
-    
-      await fetch("/delivered", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, messageId: m.messageId })
-      });
+      appendMessageToUi(m.sender, m.text, false, m.timestamp);
+      await fetch("/delivered", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token, id: m.id }) });
     }
   }catch(e){ console.warn("inbox error", e); }
 }
@@ -294,69 +271,6 @@ const configuration = {
     { urls: "turn:193.42.113.15:3478", username: "server", credential: "pserver" }
   ]
 };
-
-function getRenderedSet(chatId){
-  if(!renderedMessageIds[chatId]) renderedMessageIds[chatId] = new Set();
-  return renderedMessageIds[chatId];
-}
-
-function resetRenderedSet(chatId){
-  renderedMessageIds[chatId] = new Set();
-}
-
-function isPeerAlive(peerId){
-  const pc = pcs[peerId];
-  const dc = dataChannels[peerId];
-  return !!(
-    pc &&
-    dc &&
-    pc.connectionState === "connected" &&
-    dc.readyState === "open"
-  );
-}
-
-function destroyPeer(peerId){
-  if(reconnectTimers[peerId] && reconnectTimers[peerId].timerId){
-    clearTimeout(reconnectTimers[peerId].timerId);
-    reconnectTimers[peerId].timerId = null;
-  }
-
-  try { if(pcs[peerId]) pcs[peerId].close(); } catch(e){}
-  try { if(dataChannels[peerId]) dataChannels[peerId].close(); } catch(e){}
-
-  delete pcs[peerId];
-  delete dataChannels[peerId];
-  delete candidateQueues[peerId];
-}
-
-function syncPeerConnection(peerId, chatId){
-  if(peerId === myUserId) return;
-
-  if(isPeerAlive(peerId)) return;
-
-  destroyPeer(peerId);
-
-  // инициатором всё ещё остаётся "меньший" id
-  if(String(myUserId) < String(peerId)){
-    startConnectionToPeer(peerId, chatId);
-  }
-}
-
-function syncChatPeers(chatId){
-  const chat = chatsList.find(c => c.chatId === chatId);
-  const members = chat?.members || [];
-  const online = new Set(onlineInChat[chatId] || []);
-
-  for(const peer of members){
-    if(peer === myUserId) continue;
-
-    if(online.has(peer)){
-      syncPeerConnection(peer, chatId);
-    } else {
-      destroyPeer(peer);
-    }
-  }
-}
 
 function createPeerFor(peerId, chatId){
   const pc = new RTCPeerConnection(configuration);
@@ -388,52 +302,20 @@ function createPeerFor(peerId, chatId){
 function setupDataChannel(peerId){
   const dc = dataChannels[peerId];
   if(!dc) return;
-
   dc.onopen = () => {
     log(`DC[${peerId}] открыт`);
+  
+    // сброс таймера реконнекта
     if(reconnectTimers[peerId]){
       clearTimeout(reconnectTimers[peerId].timerId);
       reconnectTimers[peerId].timerId = null;
       reconnectTimers[peerId].attempts = 0;
     }
   };
-
-  dc.onmessage = ev => {
-    let payload = null;
-    try { payload = JSON.parse(ev.data); } catch(e) {}
-
-    // новый формат
-    if(payload && payload.type === "chat-message"){
-      if(payload.chatId !== activeChatId) return;
-
-      appendMessageToUi(
-        payload.sender,
-        payload.text,
-        payload.sender === myUserId,
-        payload.timestamp || Date.now(),
-        payload.messageId,
-        payload.chatId
-      );
-
-      if(payload.messageId){
-        fetch("/delivered", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, messageId: payload.messageId })
-        }).catch(()=>{});
-      }
-      return;
-    }
-
-    // старый fallback-формат
-    appendMessageToUi(peerId, ev.data, false, Date.now(), null, activeChatId);
-  };
-
-  dc.onclose = () => {
-    log(`DC[${peerId}] закрыт`);
-    scheduleReconnect(peerId, activeChatId);
-  };
+  dc.onmessage = ev => appendMessageToUi(peerId, ev.data, false, Date.now());
+  dc.onclose = () => { log(`DC[${peerId}] закрыт`); scheduleReconnect(peerId, activeChatId); };
 }
+
 function safeSendSignal(target, chatId, data){
   if(!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type:"signal", target, from: myUserId, chatId, data }));
@@ -441,10 +323,7 @@ function safeSendSignal(target, chatId, data){
 
 async function startConnectionToPeer(peerId, chatId){
   if(isPeerAlive(peerId)) return;
-  if(!(String(myUserId) < String(peerId))) return;
-
-  destroyPeer(peerId);
-
+  if(!(myUserId < peerId)) return; // tie-break
   const pc = createPeerFor(peerId, chatId);
   const channel = pc.createDataChannel("chat");
   dataChannels[peerId] = channel;
@@ -457,24 +336,19 @@ async function startConnectionToPeer(peerId, chatId){
 
 async function handleSignal(from, chatId, data){
   const peerId = from;
-
   if(data.type === "offer"){
-    destroyPeer(peerId);
-    createPeerFor(peerId, chatId);
-
+    if(!pcs[peerId]) createPeerFor(peerId, chatId);
     const pc = pcs[peerId];
     await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     safeSendSignal(peerId, chatId, { type:"answer", answer });
-
     if(candidateQueues[peerId]){
       for(const c of candidateQueues[peerId]) await pc.addIceCandidate(c);
       candidateQueues[peerId] = [];
     }
     return;
   }
-
   if(data.type === "answer"){
     const pc = pcs[peerId];
     if(pc){
@@ -486,7 +360,6 @@ async function handleSignal(from, chatId, data){
     }
     return;
   }
-
   if(data.type === "candidate"){
     const pc = pcs[peerId];
     if(pc && pc.remoteDescription){
