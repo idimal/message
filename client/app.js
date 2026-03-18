@@ -8,6 +8,7 @@ const pcs = {};
 const dataChannels = {};
 const candidateQueues = {};
 const reconnectTimers = {};
+const renderedMessages = new Set();
 
 // chat state
 let activeChatId = null;
@@ -122,6 +123,7 @@ function startWebSocket(){
 
 // --- Chat page: открыть чат, загрузить историю, render ---
 async function app_openChat(chatId){
+  renderedMessages.clear();
   activeChatId = chatId;
   await app_loadChats(); // убедимся, что список чатов загружен (для названия/участников)
   renderActiveChat();
@@ -158,7 +160,13 @@ async function app_loadHistory(chatId){
     if(mcont) mcont.innerHTML = "";
     for(const m of msgs){
       const isLocal = (m.sender === myUserId);
-      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp);
+      appendMessageToUi(
+        m.sender,
+        m.text,
+        isLocal,
+        m.timestamp,
+        m.messageId
+      );
     }
     if(mcont) mcont.scrollTop = mcont.scrollHeight;
   }catch(e){
@@ -209,7 +217,11 @@ async function app_sendMessage(){
     const dc = dataChannels[p];
     if(dc && dc.readyState === "open"){
       try{
-        dc.send(text);
+        dc.send(JSON.stringify({
+          messageId,
+          text,
+          timestamp: savedTimestamp
+        }));
         sentP2P = true;
       }catch(e){
         console.warn("send p2p err", e);
@@ -217,8 +229,14 @@ async function app_sendMessage(){
     }
   }
 
+  let messageId = null;
+
+  const data = await res.json().catch(() => ({}));
+  if (data.timestamp) savedTimestamp = data.timestamp;
+  if (data.messageId) messageId = data.messageId;
+
   // 3) Локально показываем сообщение один раз
-  appendMessageToUi(null, text, true, savedTimestamp);
+  appendMessageToUi(null, text, true, savedTimestamp, messageId);
 
   if(!sentP2P){
     log("Сообщение сохранено на сервере, доставка пойдёт через fallback.");
@@ -228,24 +246,34 @@ async function app_sendMessage(){
 }
 
 // append message UI helper
-function appendMessageToUi(peerId, text, isLocal, ts){
+function appendMessageToUi(peerId, text, isLocal, ts, messageId){
+  if(messageId){
+    if(renderedMessages.has(messageId)) return;
+    renderedMessages.add(messageId);
+  }
+
   const mcont = q("messages");
   if(!mcont){
-    // debug fallback
     log((isLocal ? "Я" : (peerId||"Сервер")) + ": " + text);
     return;
   }
+
   const row = document.createElement("div");
   row.className = "msg-row";
+
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble " + (isLocal ? "msg-local" : "msg-remote");
   bubble.textContent = text;
+
   row.appendChild(bubble);
+
   const meta = document.createElement("div");
   meta.className = "msg-meta small";
   const who = isLocal ? "Я" : (peerId || "Сервер");
+
   meta.textContent = who + (ts ? " • " + new Date(ts).toLocaleTimeString() : "");
   bubble.appendChild(meta);
+
   mcont.appendChild(row);
   mcont.scrollTop = mcont.scrollHeight;
 }
@@ -258,8 +286,18 @@ async function checkInboxForChat(chatId){
     if(!res.ok) return;
     const msgs = await res.json();
     for(const m of msgs){
-      appendMessageToUi(m.sender, m.text, false, m.timestamp);
-      await fetch("/delivered", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token, id: m.id }) });
+      appendMessageToUi(
+        m.sender,
+        m.text,
+        false,
+        m.timestamp,
+        m.messageId
+      );
+      await fetch("/delivered", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ token, messageId: m.messageId })
+      });
     }
   }catch(e){ console.warn("inbox error", e); }
 }
@@ -312,7 +350,21 @@ function setupDataChannel(peerId){
       reconnectTimers[peerId].attempts = 0;
     }
   };
-  dc.onmessage = ev => appendMessageToUi(peerId, ev.data, false, Date.now());
+  dc.onmessage = ev => {
+    try{
+      const msg = JSON.parse(ev.data);
+      appendMessageToUi(
+        peerId,
+        msg.text,
+        false,
+        msg.timestamp,
+        msg.messageId
+      );
+    }catch(e){
+      // fallback (старый формат)
+      appendMessageToUi(peerId, ev.data, false, Date.now());
+    }
+  };
   dc.onclose = () => { log(`DC[${peerId}] закрыт`); scheduleReconnect(peerId, activeChatId); };
 }
 
