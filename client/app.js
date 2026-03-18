@@ -8,6 +8,7 @@ const pcs = {};
 const dataChannels = {};
 const candidateQueues = {};
 const reconnectTimers = {};
+const renderedMessageIds = {};
 
 // chat state
 let activeChatId = null;
@@ -123,6 +124,7 @@ function startWebSocket(){
 // --- Chat page: открыть чат, загрузить историю, render ---
 async function app_openChat(chatId){
   activeChatId = chatId;
+  resetRenderedSet(chatId);
   await app_loadChats(); // убедимся, что список чатов загружен (для названия/участников)
   renderActiveChat();
   await app_loadHistory(chatId);
@@ -158,7 +160,7 @@ async function app_loadHistory(chatId){
     if(mcont) mcont.innerHTML = "";
     for(const m of msgs){
       const isLocal = (m.sender === myUserId);
-      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp);
+      appendMessageToUi(m.sender, m.text, isLocal, m.timestamp, m.id, chatId);
     }
     if(mcont) mcont.scrollTop = mcont.scrollHeight;
   }catch(e){
@@ -178,38 +180,46 @@ async function app_sendMessage(){
   const chat = chatsList.find(c => c.chatId === activeChatId);
   if(!chat) return;
 
-  // 1) Сначала сохраняем сообщение на сервере:
-  // история станет доступна сразу и всегда.
+  let messageId = null;
   let savedTimestamp = Date.now();
-  try {
+
+  try{
     const res = await fetch(`/chats/${encodeURIComponent(activeChatId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, text })
     });
 
-    if(!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(errText || "save failed");
-    }
+    if(!res.ok) throw new Error("save failed");
 
-    const data = await res.json().catch(() => ({}));
-    if (data.timestamp) savedTimestamp = data.timestamp;
-  } catch (e) {
+    const data = await res.json();
+    messageId = data.messageId;
+    savedTimestamp = data.timestamp || savedTimestamp;
+  }catch(e){
     console.warn("Server save failed:", e);
-    alert("Не удалось сохранить сообщение на сервере. История может не обновиться.");
+    alert("Не удалось сохранить сообщение на сервере.");
     return;
   }
 
-  // 2) Потом пробуем отправить по P2P
-  const peers = chat.members.filter(m => m !== myUserId);
-  let sentP2P = false;
+  // показать локально один раз
+  appendMessageToUi(myUserId, text, true, savedTimestamp, messageId, activeChatId);
 
+  const peers = chat.members.filter(m => m !== myUserId);
+  const payload = JSON.stringify({
+    type: "chat-message",
+    messageId,
+    chatId: activeChatId,
+    sender: myUserId,
+    text,
+    timestamp: savedTimestamp
+  });
+
+  let sentP2P = false;
   for(const p of peers){
     const dc = dataChannels[p];
     if(dc && dc.readyState === "open"){
       try{
-        dc.send(text);
+        dc.send(payload);
         sentP2P = true;
       }catch(e){
         console.warn("send p2p err", e);
@@ -217,35 +227,43 @@ async function app_sendMessage(){
     }
   }
 
-  // 3) Локально показываем сообщение один раз
-  appendMessageToUi(null, text, true, savedTimestamp);
-
   if(!sentP2P){
-    log("Сообщение сохранено на сервере, доставка пойдёт через fallback.");
+    log("Сохранено на сервере, доставка пойдёт через fallback.");
   }
 
   txtInput.value = "";
 }
 
 // append message UI helper
-function appendMessageToUi(peerId, text, isLocal, ts){
+function appendMessageToUi(peerId, text, isLocal, ts, messageId, chatId){
+  const targetChatId = chatId || activeChatId;
+  if(messageId && targetChatId){
+    const seen = getRenderedSet(targetChatId);
+    const key = String(messageId);
+    if(seen.has(key)) return;
+    seen.add(key);
+  }
+
   const mcont = q("messages");
   if(!mcont){
-    // debug fallback
     log((isLocal ? "Я" : (peerId||"Сервер")) + ": " + text);
     return;
   }
+
   const row = document.createElement("div");
   row.className = "msg-row";
+
   const bubble = document.createElement("div");
   bubble.className = "msg-bubble " + (isLocal ? "msg-local" : "msg-remote");
   bubble.textContent = text;
   row.appendChild(bubble);
+
   const meta = document.createElement("div");
   meta.className = "msg-meta small";
   const who = isLocal ? "Я" : (peerId || "Сервер");
   meta.textContent = who + (ts ? " • " + new Date(ts).toLocaleTimeString() : "");
   bubble.appendChild(meta);
+
   mcont.appendChild(row);
   mcont.scrollTop = mcont.scrollHeight;
 }
@@ -258,8 +276,13 @@ async function checkInboxForChat(chatId){
     if(!res.ok) return;
     const msgs = await res.json();
     for(const m of msgs){
-      appendMessageToUi(m.sender, m.text, false, m.timestamp);
-      await fetch("/delivered", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token, id: m.id }) });
+      appendMessageToUi(m.sender, m.text, false, m.timestamp, m.messageId, chatId);
+    
+      await fetch("/delivered", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, messageId: m.messageId })
+      });
     }
   }catch(e){ console.warn("inbox error", e); }
 }
@@ -271,6 +294,16 @@ const configuration = {
     { urls: "turn:193.42.113.15:3478", username: "server", credential: "pserver" }
   ]
 };
+
+function getRenderedSet(chatId){
+  if(!renderedMessageIds[chatId]) renderedMessageIds[chatId] = new Set();
+  return renderedMessageIds[chatId];
+}
+
+function resetRenderedSet(chatId){
+  renderedMessageIds[chatId] = new Set();
+}
+
 
 function createPeerFor(peerId, chatId){
   const pc = new RTCPeerConnection(configuration);
