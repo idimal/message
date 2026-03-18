@@ -1,6 +1,5 @@
 const db = require("./database");
 
-// --- schema ---
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS chat_history (
@@ -15,6 +14,7 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS pending_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      messageId INTEGER NOT NULL,
       chatId TEXT NOT NULL,
       sender TEXT NOT NULL,
       receiver TEXT NOT NULL,
@@ -25,7 +25,6 @@ db.serialize(() => {
   `);
 });
 
-// Save one message to history + create delivery queue for offline/fallback recipients
 function storeMessage(sender, chatId, text, recipients, callback) {
   const timestamp = Date.now();
   const cleanRecipients = Array.from(
@@ -43,34 +42,35 @@ function storeMessage(sender, chatId, text, recipients, callback) {
         return;
       }
 
+      const messageId = this.lastID;
+
       if (cleanRecipients.length === 0) {
-        if (callback) callback(true, { messageId: this.lastID, timestamp });
+        if (callback) callback(true, { messageId, timestamp });
         return;
       }
 
       const stmt = db.prepare(`
         INSERT INTO pending_messages
-          (chatId, sender, receiver, text, timestamp, delivered)
-        VALUES (?, ?, ?, ?, ?, 0)
+          (messageId, chatId, sender, receiver, text, timestamp, delivered)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
       `);
 
       for (const receiver of cleanRecipients) {
-        stmt.run([chatId, sender, receiver, text, timestamp]);
+        stmt.run([messageId, chatId, sender, receiver, text, timestamp]);
       }
 
-      stmt.finalize((finalizeErr) => {
-        if (finalizeErr) {
-          console.error("storeMessage pending finalize error:", finalizeErr);
+      stmt.finalize(err2 => {
+        if (err2) {
+          console.error("storeMessage pending finalize error:", err2);
           if (callback) callback(false);
           return;
         }
-        if (callback) callback(true, { messageId: this.lastID, timestamp });
+        if (callback) callback(true, { messageId, timestamp });
       });
     }
   );
 }
 
-// Pending/offline messages for a user
 function getMessagesForUser(user, chatId, callback) {
   const sql = chatId
     ? `SELECT * FROM pending_messages
@@ -92,13 +92,18 @@ function getMessagesForUser(user, chatId, callback) {
   });
 }
 
-function markDelivered(id) {
-  db.run(`UPDATE pending_messages SET delivered=1 WHERE id=?`, [id], err => {
-    if (err) console.error("markDelivered error:", err);
-  });
+function markDelivered(messageId, receiver) {
+  db.run(
+    `UPDATE pending_messages
+     SET delivered=1
+     WHERE messageId=? AND receiver=?`,
+    [messageId, receiver],
+    err => {
+      if (err) console.error("markDelivered error:", err);
+    }
+  );
 }
 
-// Full chat history
 function getHistory(chatId, limit, callback) {
   const lim = Number.isFinite(limit) ? limit : 200;
 
