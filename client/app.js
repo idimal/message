@@ -8,7 +8,6 @@ const pcs = {};
 const dataChannels = {};
 const candidateQueues = {};
 const reconnectTimers = {};
-const intentionalPeerCloses = new Set();
 const renderedMessageIds = {}; // chatId -> Set(messageId)
 
 // chat state
@@ -305,7 +304,7 @@ function resetRenderedSet(chatId){
   renderedMessageIds[chatId] = new Set();
 }
 
-function isPeerReady(peerId){
+function isPeerAlive(peerId){
   const pc = pcs[peerId];
   const dc = dataChannels[peerId];
   return !!(
@@ -316,23 +315,7 @@ function isPeerReady(peerId){
   );
 }
 
-function isPeerConnecting(peerId){
-  const pc = pcs[peerId];
-  if(!pc) return false;
-
-  return (
-    pc.connectionState === "new" ||
-    pc.connectionState === "connecting" ||
-    pc.signalingState === "have-local-offer" ||
-    pc.signalingState === "have-remote-offer"
-  );
-}
-
-function destroyPeer(peerId, { silent = true } = {}){
-  if(silent){
-    intentionalPeerCloses.add(peerId);
-  }
-
+function destroyPeer(peerId){
   if(reconnectTimers[peerId] && reconnectTimers[peerId].timerId){
     clearTimeout(reconnectTimers[peerId].timerId);
     reconnectTimers[peerId].timerId = null;
@@ -344,43 +327,16 @@ function destroyPeer(peerId, { silent = true } = {}){
   delete pcs[peerId];
   delete dataChannels[peerId];
   delete candidateQueues[peerId];
-
-  setTimeout(() => intentionalPeerCloses.delete(peerId), 0);
 }
 
-function scheduleReconnect(peerId, chatId, baseDelay = 1500){
-  const online = (onlineInChat[chatId] || []).includes(peerId);
-  if(!online) return;
-  if(activeChatId !== chatId) return;
-
-  reconnectTimers[peerId] = reconnectTimers[peerId] || { attempts: 0, timerId: null };
-  const state = reconnectTimers[peerId];
-  if(state.timerId) return;
-
-  state.attempts = Math.min(10, state.attempts + 1);
-  const delay = Math.min(30000, baseDelay * Math.pow(1.6, state.attempts - 1));
-
-  log(`Переподключение к ${peerId} через ${Math.round(delay/1000)}с (попытка ${state.attempts})`);
-
-  state.timerId = setTimeout(() => {
-    state.timerId = null;
-    if(activeChatId !== chatId) return;
-    ensurePeerConnection(peerId, chatId);
-  }, delay);
-}
-
-function ensurePeerConnection(peerId, chatId){
+function syncPeerConnection(peerId, chatId){
   if(peerId === myUserId) return;
-  if(!(onlineInChat[chatId] || []).includes(peerId)) return;
 
-  if(isPeerReady(peerId) || isPeerConnecting(peerId)){
-    return;
-  }
+  if(isPeerAlive(peerId)) return;
 
-  if(pcs[peerId] || dataChannels[peerId]){
-    destroyPeer(peerId, { silent: true });
-  }
+  destroyPeer(peerId);
 
+  // инициатором всё ещё остаётся "меньший" id
   if(String(myUserId) < String(peerId)){
     startConnectionToPeer(peerId, chatId);
   }
@@ -395,9 +351,9 @@ function syncChatPeers(chatId){
     if(peer === myUserId) continue;
 
     if(online.has(peer)){
-      ensurePeerConnection(peer, chatId);
+      syncPeerConnection(peer, chatId);
     } else {
-      destroyPeer(peer, { silent: true });
+      destroyPeer(peer);
     }
   }
 }
@@ -406,52 +362,26 @@ function createPeerFor(peerId, chatId){
   const pc = new RTCPeerConnection(configuration);
   pcs[peerId] = pc;
   candidateQueues[peerId] = candidateQueues[peerId] || [];
-
-  if(reconnectTimers[peerId] && reconnectTimers[peerId].timerId){
-    clearTimeout(reconnectTimers[peerId].timerId);
-    reconnectTimers[peerId].timerId = null;
-  }
+  if(reconnectTimers[peerId]){ clearTimeout(reconnectTimers[peerId].timerId); reconnectTimers[peerId].attempts = 0; }
 
   pc.onicecandidate = ev => {
     if(ev.candidate){
-      safeSendSignal(peerId, chatId, { type: "candidate", candidate: ev.candidate });
+      safeSendSignal(peerId, chatId, { type:"candidate", candidate: ev.candidate });
     }
   };
-
   pc.onconnectionstatechange = () => {
     log(`PC[${peerId}] ${pc.connectionState}`);
-
-    if(pc.connectionState === "connected"){
-      if(reconnectTimers[peerId]){
-        reconnectTimers[peerId].attempts = 0;
-        if(reconnectTimers[peerId].timerId){
-          clearTimeout(reconnectTimers[peerId].timerId);
-          reconnectTimers[peerId].timerId = null;
-        }
-      }
-      return;
-    }
-
-    if(pc.connectionState === "disconnected"){
-      // не сносим сразу — WebRTC часто кратковременно отваливается при реконнекте
-      scheduleReconnect(peerId, chatId, 4000);
-      return;
-    }
-
-    if(pc.connectionState === "failed" || pc.connectionState === "closed"){
-      if(intentionalPeerCloses.has(peerId)){
-        return;
-      }
-      destroyPeer(peerId, { silent: true });
-      scheduleReconnect(peerId, chatId, 1000);
+    if(pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed"){
+      try{ pc.close(); }catch(e){}
+      delete pcs[peerId];
+      delete dataChannels[peerId];
+      scheduleReconnect(peerId, chatId);
     }
   };
-
-  pc.ondatachannel = ev => {
+  pc.ondatachannel = (ev) => {
     dataChannels[peerId] = ev.channel;
     setupDataChannel(peerId);
   };
-
   return pc;
 }
 
@@ -461,13 +391,10 @@ function setupDataChannel(peerId){
 
   dc.onopen = () => {
     log(`DC[${peerId}] открыт`);
-
     if(reconnectTimers[peerId]){
+      clearTimeout(reconnectTimers[peerId].timerId);
+      reconnectTimers[peerId].timerId = null;
       reconnectTimers[peerId].attempts = 0;
-      if(reconnectTimers[peerId].timerId){
-        clearTimeout(reconnectTimers[peerId].timerId);
-        reconnectTimers[peerId].timerId = null;
-      }
     }
   };
 
@@ -475,6 +402,7 @@ function setupDataChannel(peerId){
     let payload = null;
     try { payload = JSON.parse(ev.data); } catch(e) {}
 
+    // новый формат
     if(payload && payload.type === "chat-message"){
       if(payload.chatId !== activeChatId) return;
 
@@ -492,34 +420,30 @@ function setupDataChannel(peerId){
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token, messageId: payload.messageId })
-        }).catch(() => {});
+        }).catch(()=>{});
       }
       return;
     }
 
+    // старый fallback-формат
     appendMessageToUi(peerId, ev.data, false, Date.now(), null, activeChatId);
   };
 
   dc.onclose = () => {
     log(`DC[${peerId}] закрыт`);
-    if(intentionalPeerCloses.has(peerId)){
-      intentionalPeerCloses.delete(peerId);
-      return;
-    }
-    scheduleReconnect(peerId, activeChatId, 1500);
+    scheduleReconnect(peerId, activeChatId);
   };
 }
-
 function safeSendSignal(target, chatId, data){
   if(!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type:"signal", target, from: myUserId, chatId, data }));
 }
 
 async function startConnectionToPeer(peerId, chatId){
-  if(isPeerReady(peerId) || isPeerConnecting(peerId)) return;
+  if(isPeerAlive(peerId)) return;
   if(!(String(myUserId) < String(peerId))) return;
 
-  destroyPeer(peerId, { silent: true });
+  destroyPeer(peerId);
 
   const pc = createPeerFor(peerId, chatId);
   const channel = pc.createDataChannel("chat");
@@ -528,21 +452,21 @@ async function startConnectionToPeer(peerId, chatId){
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  safeSendSignal(peerId, chatId, { type: "offer", offer });
+  safeSendSignal(peerId, chatId, { type:"offer", offer });
 }
 
 async function handleSignal(from, chatId, data){
   const peerId = from;
 
   if(data.type === "offer"){
-    destroyPeer(peerId, { silent: true });
+    destroyPeer(peerId);
     createPeerFor(peerId, chatId);
 
     const pc = pcs[peerId];
     await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    safeSendSignal(peerId, chatId, { type: "answer", answer });
+    safeSendSignal(peerId, chatId, { type:"answer", answer });
 
     if(candidateQueues[peerId]){
       for(const c of candidateQueues[peerId]) await pc.addIceCandidate(c);
@@ -575,7 +499,87 @@ async function handleSignal(from, chatId, data){
   }
 }
 
+function scheduleReconnect(peerId, chatId){
+  if(reconnectTimers[peerId] && reconnectTimers[peerId].timerId) return;
+  reconnectTimers[peerId] = reconnectTimers[peerId] || { attempts:0, timerId:null };
+  const state = reconnectTimers[peerId];
+  state.attempts = Math.min(10, state.attempts + 1);
+  const delay = Math.min(30000, 1000 * Math.pow(2, state.attempts));
+  log(`Переподключение к ${peerId} через ${Math.round(delay/1000)}с (попытка ${state.attempts})`);
+  state.timerId = setTimeout(async () => {
+    state.timerId = null;
+    const online = (onlineInChat[chatId] || []).includes(peerId);
+    if(online && activeChatId === chatId){
+      await startConnectionToPeer(peerId, chatId);
+    } else {
+      scheduleReconnect(peerId, chatId);
+    }
+  }, delay);
+}
 
+function isPeerAlive(peerId){
+  const pc = pcs[peerId];
+  const dc = dataChannels[peerId];
+
+  if(!pc || !dc) return false;
+
+  if(pc.connectionState !== "connected") return false;
+  if(dc.readyState !== "open") return false;
+
+  return true;
+}
+
+function tryAutoConnectToChatPeers(chatId){
+  const users = onlineInChat[chatId] || [];
+
+  for(const peer of users){
+    if(peer === myUserId) continue;
+
+    if(!isPeerAlive(peer)){
+      console.log("Пересоздаём соединение с", peer);
+
+      // 💣 ВАЖНО: убиваем старое соединение полностью
+      if(pcs[peer]){
+        try{ pcs[peer].close(); }catch(e){}
+        delete pcs[peer];
+      }
+
+      if(dataChannels[peer]){
+        try{ dataChannels[peer].close(); }catch(e){}
+        delete dataChannels[peer];
+      }
+
+      startConnectionToPeer(peer, chatId);
+    }
+  }
+}
+
+setInterval(() => {
+  if(!activeChatId) return;
+
+  const users = onlineInChat[activeChatId] || [];
+
+  for(const peer of users){
+    if(peer === myUserId) continue;
+
+    if(!isPeerAlive(peer)){
+      console.log("Watchdog: reconnect to", peer);
+
+      if(pcs[peer]){
+        try{ pcs[peer].close(); }catch(e){}
+        delete pcs[peer];
+      }
+
+      if(dataChannels[peer]){
+        try{ dataChannels[peer].close(); }catch(e){}
+        delete dataChannels[peer];
+      }
+
+      startConnectionToPeer(peer, activeChatId);
+    }
+  }
+
+}, 5000);
 
 // --- Утилиты ---
 function escapeHtml(s){ if(!s) return ""; return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
