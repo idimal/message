@@ -37,27 +37,16 @@
   }
   
   /* Forms */
-  input[type="text"], input[type="password"] {
+  input[type="text"], input[type="password"], textarea {
     width:100%;
     padding:12px 14px;
-    border-radius:12px;
-    border:1px solid rgba(255,255,255,0.06);
-    background: rgba(255,255,255,0.04);
-    color:#fff;
-    font-size:15px;
-    outline:none;
+    border-radius:10px;
+    border: none;
+    background: rgba(255,255,255,0.03);
+    color: #fff;
+    font-size:16px;
+    outline: none;
     margin-top:8px;
-    transition: all 0.2s ease;
-  }
-  
-  input::placeholder {
-    color: rgba(255,255,255,0.4);
-  }
-  
-  input:focus {
-    border:1px solid rgba(185,159,234,0.6);
-    box-shadow: 0 0 0 2px rgba(185,159,234,0.15);
-    background: rgba(255,255,255,0.06);
   }
   
   button.btn {
@@ -229,140 +218,3 @@
     .container{ padding:24px; }
     .messages { max-height:70vh; }
   }
-
-  /* ===== ANIMATIONS ===== */
-
-.chat-card {
-  transition: transform 0.2s ease, background 0.2s;
-}
-.chat-card:active {
-  transform: scale(0.97);
-}
-
-.btn {
-  transition: transform 0.15s ease, opacity 0.15s;
-}
-.btn:active {
-  transform: scale(0.95);
-}
-
-/* появление чатов */
-.chat-card {
-  animation: fadeInUp 0.3s ease;
-}
-
-@keyframes fadeInUp {
-  from { opacity:0; transform: translateY(10px); }
-  to { opacity:1; transform: translateY(0); }
-}
-
-/* сообщения */
-.msg-bubble {
-  animation: msgIn 0.2s ease;
-}
-@keyframes msgIn {
-  from { opacity:0; transform: scale(0.95); }
-  to { opacity:1; transform: scale(1); }
-}
-
-/* ===== MODAL ===== */
-
-.modal-overlay {
-  position:fixed;
-  inset:0;
-  background: rgba(0,0,0,0.6);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  opacity:0;
-  pointer-events:none;
-  transition: opacity 0.2s ease;
-}
-
-.modal-overlay.show {
-  opacity:1;
-  pointer-events:auto;
-}
-
-.modal {
-  background:#2f2f2f;
-  padding:20px;
-  border-radius:16px;
-  width:90%;
-  max-width:400px;
-  transform: translateY(20px);
-  transition: transform 0.25s ease;
-}
-
-.modal-overlay.show .modal {
-  transform: translateY(0);
-}
-
-.hidden {
-  display:none;
-}
-
-.ghost {
-  background: transparent;
-  border:1px solid rgba(255,255,255,0.1);
-  color:#ccc;
-}
-
-/* отправка сообщения */
-.msg-local {
-  animation: sendMsg 0.25s ease;
-}
-
-@keyframes sendMsg {
-  0% {
-    opacity:0;
-    transform: translateX(30px) scale(0.95);
-  }
-  100% {
-    opacity:1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-.typing {
-  display:flex;
-  align-items:center;
-  gap:6px;
-  color:var(--muted);
-  font-size:14px;
-  padding:6px 10px;
-}
-
-.dots {
-  display:flex;
-  gap:3px;
-}
-
-.dots div {
-  width:6px;
-  height:6px;
-  background: var(--muted);
-  border-radius:50%;
-  animation: blink 1.4s infinite;
-}
-
-.dots div:nth-child(2){ animation-delay:0.2s; }
-.dots div:nth-child(3){ animation-delay:0.4s; }
-
-@keyframes blink {
-  0%,80%,100% { opacity:0.2; }
-  40% { opacity:1; }
-}
-
-.status-dot {
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:#555;
-  display:inline-block;
-  margin-left:4px;
-}
-
-.status-online {
-  background: var(--accent-green);
-}

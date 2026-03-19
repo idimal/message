@@ -2,7 +2,6 @@
 let ws;
 let myUserId = null;
 let token = null;
-let typingTimeout = null;
 
 // peer state (частично сохранено из оригинала)
 const pcs = {};
@@ -23,17 +22,6 @@ function log(msg){
   if(!el) return console.log(msg);
   el.textContent += msg + "\n";
   el.scrollTop = el.scrollHeight;
-}
-
-function showTyping(){
-  const el = document.getElementById("typing");
-  if(!el) return;
-  el.classList.remove("hidden");
-
-  clearTimeout(typingTimeout);
-  typingTimeout = setTimeout(() => {
-    el.classList.add("hidden");
-  }, 2000);
 }
 
 // --- init проверка авторизации ---
@@ -69,13 +57,7 @@ async function app_loadChats(){
   }
 }
 
-function isChatOnline(chat){
-  const online = onlineInChat[chat.chatId] || [];
-  return online.length > 1;
-}
-
 function renderChats(){
-  
   const cont = q("chats");
   const empty = q("emptyHint");
   if(!cont) return;
@@ -85,17 +67,11 @@ function renderChats(){
     return;
   }
   if(empty) empty.style.display = "none";
-  chatsList.forEach((c, i) => {
+  chatsList.forEach(c => {
     const el = document.createElement("div");
     el.className = "chat-card";
-    el.style.animationDelay = (i * 0.05) + "s";
-    el.innerHTML = `
-  <div style="display:flex;justify-content:space-between;">
-    <div class="chat-name">${escapeHtml(c.name)}</div>
-    <div class="status-dot ${isChatOnline(c) ? 'status-online' : ''}"></div>
-  </div>
-  <div class="chat-members">${escapeHtml((c.members||[]).join(", "))}</div>
-`;
+    el.innerHTML = `<div class="chat-name">${escapeHtml(c.name || c.chatId)}</div>
+                    <div class="chat-members">${escapeHtml((c.members||[]).join(", "))}</div>`;
     el.onclick = () => { location.href = "/chat.html?chatId="+encodeURIComponent(c.chatId); };
     cont.appendChild(el);
   });
@@ -135,10 +111,6 @@ function startWebSocket(){
         await handleSignal(msg.from, msg.chatId, msg.data);
       } else if(msg.type === "error"){
         log("Сервер: " + (msg.error || ""));
-      } else if(msg.type === "typing"){
-        if(msg.userId !== myUserId && msg.chatId === activeChatId){
-          showTyping();
-        }
       }
     }catch(e){ console.warn("ws msg err", e); }
   };
@@ -172,10 +144,7 @@ function renderActiveChat(){
   }
   if(partsEl){
     const parts = onlineInChat[activeChatId] || (activeChatId ? chatsList.find(c=>c.chatId===activeChatId)?.members || [] : []);
-    partsEl.innerHTML = parts.map(p=>{
-      const online = (onlineInChat[activeChatId]||[]).includes(p);
-      return `<span>${p} <span class="status-dot ${online?'status-online':''}"></span></span>`;
-    }).join(", ");
+    partsEl.textContent = "Участники: " + (parts.join(", ") || "-");
   }
 }
 
@@ -199,19 +168,8 @@ async function app_loadHistory(chatId){
   }
 }
 
-function sendTyping(isTyping){
-  if(!ws || ws.readyState !== WebSocket.OPEN || !activeChatId) return;
-  ws.send(JSON.stringify({
-    type: "typing",
-    chatId: activeChatId,
-    userId: myUserId,
-    isTyping
-  }));
-}
-
 // --- отправка сообщения (используется на chat.html) ---
 async function app_sendMessage(){
-  sendTyping(false);
   const txtInput = q("message");
   if(!txtInput) return;
 
