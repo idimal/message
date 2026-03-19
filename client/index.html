@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Чаты — Messenger</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#111827">
 </head>
 <body id="index-page">
   <div class="container">
@@ -15,6 +17,7 @@
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
         <button id="btnCreatePage" class="btn btn-green">Создать чат</button>
+        <button id="enablePushBtn" type="button">Включить уведомления</button>
         <button id="btnLogout" class="btn" style="background:transparent;color:var(--muted)">Выйти</button>
       </div>
     </div>

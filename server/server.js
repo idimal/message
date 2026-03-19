@@ -1,22 +1,92 @@
 // server.js
 require("./db/init");
+require("dotenv").config();
 const users = require("./users");
 
 const express = require("express");
 const WebSocket = require("ws");
 const http = require("http");
+const https = require("https");
+const fs = require("fs");
 const cors = require("cors");
 const crypto = require("crypto");
+const webpush = require("web-push");
 
 const messages = require("./messages"); // оставляем твою реализацию, но она должна поддерживать chatId
+const pushStore = require("./pushSubscriptions");
+
+const webpush = require("web-push");
+
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || "mailto:idimal@internet.ru",
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+}
 
 const app = express();
-const server = http.createServer(app);
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:idimal@internet.ru";
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.warn("Push disabled: VAPID keys are missing.");
+}
+
+const useHttps = process.env.HTTPS_ENABLED === "1";
+
+const server = useHttps
+  ? https.createServer(
+      {
+        key: fs.readFileSync(process.env.SSL_KEY),
+        cert: fs.readFileSync(process.env.SSL_CERT),
+      },
+      app
+    )
+  : http.createServer(app);
+
 const wss = new WebSocket.Server({ server });
+
+// const server = http.createServer(app);
+// const wss = new WebSocket.Server({ server });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static("../client"));
+app.get("/push/public-key", (req, res) => {
+  if (!VAPID_PUBLIC_KEY) {
+    return res.status(500).send({ error: "push disabled" });
+  }
+  res.send({ publicKey: VAPID_PUBLIC_KEY });
+});
+
+app.post("/push/subscribe", (req, res) => {
+  const { token, subscription } = req.body;
+  const userId = tokens[token];
+
+  if (!userId) return res.status(403).send({ error: "not auth" });
+  if (!subscription) return res.status(400).send({ error: "no subscription" });
+
+  pushStore.saveSubscription(userId, subscription, ok => {
+    if (!ok) return res.status(500).send({ error: "save failed" });
+    res.send({ status: "ok" });
+  });
+});
+
+app.post("/push/unsubscribe", (req, res) => {
+  const { token, endpoint } = req.body;
+  const userId = tokens[token];
+
+  if (!userId) return res.status(403).send({ error: "not auth" });
+  if (!endpoint) return res.status(400).send({ error: "no endpoint" });
+
+  pushStore.deleteSubscription(endpoint, () => {
+    res.send({ status: "ok" });
+  });
+});
 
 // In-memory stores (replace with DB for production)
 const usersMem = {};      // userId -> { password }  (demo only: plaintext)
@@ -150,11 +220,26 @@ app.post("/chats/:chatId/messages", (req, res) => {
   messages.storeMessage(userId, chatId, text.trim(), recipients, (ok, meta) => {
     if (!ok) return res.status(500).send({ error: "store failed" });
 
-    return res.send({
+    res.send({
       status: "stored",
       messageId: meta.messageId,
       timestamp: meta.timestamp
     });
+
+    const offlineRecipients = recipients.filter(r => !clients[r]);
+    if (offlineRecipients.length === 0) return;
+
+    const payload = {
+      title: chat.name || "Новое сообщение",
+      body: `${userId}: ${text.trim()}`.slice(0, 180),
+      chatId,
+      messageId: meta.messageId,
+      url: `/chat.html?chatId=${encodeURIComponent(chatId)}`
+    };
+
+    for (const receiver of offlineRecipients) {
+      sendPushToUser(receiver, payload);
+    }
   });
 });
 
@@ -191,6 +276,31 @@ app.get("/chats/:chatId/history", (req, res) => {
     res.send(rows);
   });
 });
+
+function sendPushToUser(userId, payload) {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return;
+
+  pushStore.getSubscriptionsForUser(userId, subs => {
+    for (const row of subs) {
+      const subscription = {
+        endpoint: row.endpoint,
+        keys: {
+          p256dh: row.p256dh,
+          auth: row.auth,
+        },
+      };
+
+      webpush.sendNotification(subscription, JSON.stringify(payload)).catch(err => {
+        const code = err && err.statusCode;
+        if (code === 404 || code === 410) {
+          pushStore.deleteSubscription(row.endpoint, () => {});
+        } else {
+          console.error("webpush error:", err.message || err);
+        }
+      });
+    }
+  });
+}
 
 // ------------------------------------------------------------
 
@@ -293,6 +403,6 @@ function broadcastChatParticipants(chatId){
   
   }
 
-server.listen(3000, "0.0.0.0", () => {
-  console.log("Server running on 3000");
-});
+  server.listen(3000, "0.0.0.0", () => {
+    console.log(`Server running on 3000 (${useHttps ? "https" : "http"})`);
+  });

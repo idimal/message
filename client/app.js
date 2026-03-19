@@ -24,6 +24,84 @@ function log(msg){
   el.scrollTop = el.scrollHeight;
 }
 
+async function ensureServiceWorker() {
+  if (!("serviceWorker" in navigator)) return null;
+  try {
+    return await navigator.serviceWorker.register("/sw.js");
+  } catch (e) {
+    console.warn("SW register error:", e);
+    return null;
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function enablePushNotifications() {
+  if (!token || !myUserId) {
+    alert("Сначала войдите в аккаунт.");
+    return;
+  }
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    alert("Этот браузер не поддерживает push-уведомления.");
+    return;
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    alert("Нужно разрешение на уведомления.");
+    return;
+  }
+
+  const reg = await ensureServiceWorker();
+  if (!reg) {
+    alert("Не удалось зарегистрировать Service Worker.");
+    return;
+  }
+
+  const keyRes = await fetch("/push/public-key");
+  if (!keyRes.ok) {
+    alert("Сервер push сейчас недоступен.");
+    return;
+  }
+
+  const { publicKey } = await keyRes.json();
+  let sub = await reg.pushManager.getSubscription();
+
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey)
+    });
+  }
+
+  const res = await fetch("/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token,
+      subscription: sub.toJSON()
+    })
+  });
+
+  if (!res.ok) {
+    alert("Не удалось сохранить push-подписку.");
+    return;
+  }
+
+  alert("Уведомления включены.");
+}
+
 // --- init проверка авторизации ---
 // возвращает true если токен есть, иначе перенаправляет на login и возвращает false
 function app_init(){
@@ -36,6 +114,11 @@ function app_init(){
   // show account info if exists
   const ai = q("accountInfo");
   if(ai) ai.textContent = "Вы: " + myUserId;
+
+  ensureServiceWorker();
+
+  const pushBtn = q("enablePushBtn");
+  if (pushBtn) pushBtn.onclick = enablePushNotifications;
   // старт WS (страницы могут захотеть дополнительную инициализацию)
   startWebSocket();
   return true;
@@ -523,3 +606,4 @@ window.app_loadChats = app_loadChats;
 window.app_openChat = app_openChat;
 window.app_loadHistory = app_loadHistory;
 window.app_sendMessage = app_sendMessage;
+window.app_enablePushNotifications = enablePushNotifications;
